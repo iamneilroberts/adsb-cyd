@@ -95,20 +95,18 @@ pio device monitor -e cyd
 
 ## Touch Controls
 
-The screen is divided into three vertical zones: **left third**, **middle third**, **right third**.
+The screen is divided into three vertical zones: **left third**, **middle third**, **right third**. Tap for a short press, or hold for 1 second for a long press.
 
-| View | Left tap | Middle tap | Right tap |
-|------|----------|------------|-----------|
-| **Radar** | Cycle filter | Next view | Cycle range |
-| **Arrivals** | Cycle sort | Next view | Cycle range |
-| **Stats** | Brightness - | Next view | Brightness + |
-| **Log** | Page up | Next view | Page down |
-| **Settings** | Prev setting | Next view | Next setting |
-| **Detail** | Prev aircraft | Next view | Next aircraft |
+| View | Left tap | Middle tap | Middle HOLD (1s) | Right tap |
+|------|----------|------------|------------------|-----------|
+| **Radar** | Cycle filter (ALL → COM → MIL → EMG → HELI → FAST → SLOW → ODD) | Next view | — | Cycle range (150 → 100 → 50 → 20 → 5nm) |
+| **Arrivals** | Cycle sort (DST → ALT → SPD) | Next view | — | Cycle range |
+| **Stats** | Brightness down (-12%) | Next view | Toggle night mode (green/amber) | Brightness up (+12%) |
+| **Log** | Previous page | Next view | — | Next page |
+| **Settings** | Previous setting | Next view | Toggle/change selected setting | Next setting |
+| **Detail** | Previous aircraft | Next view | — | Next aircraft |
 
-**Long press (hold 1s) on middle:**
-- **Stats view** — toggles night mode (amber/red palette)
-- **Settings view** — changes the highlighted setting
+**View order:** RADAR → ARRIVALS → STATS → LOG → SETTINGS → DETAIL → RADAR
 
 ## Settings Screen
 
