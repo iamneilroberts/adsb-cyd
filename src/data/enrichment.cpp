@@ -1,6 +1,7 @@
 #include "enrichment.h"
 #include "http_mutex.h"
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <esp_heap_caps.h>
@@ -57,8 +58,11 @@ static void fetch_task(void *param) {
     if (params->callsign[0] && http_mutex_acquire(pdMS_TO_TICKS(8000))) {
         char url[128];
         snprintf(url, sizeof(url), "https://api.adsbdb.com/v0/callsign/%s", params->callsign);
+        WiFiClientSecure client;
+        client.setInsecure();
+        client.setHandshakeTimeout(5);
         HTTPClient http;
-        http.begin(url);
+        http.begin(client, url);
         http.setTimeout(5000);
         if (http.GET() == HTTP_CODE_OK) {
             String payload = http.getString();
@@ -70,9 +74,8 @@ static void fetch_task(void *param) {
                 const char *airline = route["airline"]["name"] | "";
                 if (airline[0]) strlcpy(entry->airline, airline, sizeof(entry->airline));
             }
-        } else {
-            http.end();
         }
+        http.end();
         http_mutex_release();
         notify_callback(entry);
     }
@@ -81,8 +84,11 @@ static void fetch_task(void *param) {
     if (http_mutex_acquire(pdMS_TO_TICKS(8000))) {
         char url[128];
         snprintf(url, sizeof(url), "https://api.adsbdb.com/v0/aircraft/%s", params->icao_hex);
+        WiFiClientSecure client;
+        client.setInsecure();
+        client.setHandshakeTimeout(5);
         HTTPClient http;
-        http.begin(url);
+        http.begin(client, url);
         http.setTimeout(5000);
         if (http.GET() == HTTP_CODE_OK) {
             String payload = http.getString();
@@ -98,9 +104,8 @@ static void fetch_task(void *param) {
                 strlcpy(entry->engine_type, ac["engine_type"] | "", sizeof(entry->engine_type));
                 entry->year_built = ac["year_built"] | 0;
             }
-        } else {
-            http.end();
         }
+        http.end();
         http_mutex_release();
         notify_callback(entry);
     }
@@ -111,8 +116,11 @@ static void fetch_task(void *param) {
         char url[128];
         snprintf(url, sizeof(url),
                  "https://api.planespotters.net/pub/photos/hex/%s", params->icao_hex);
+        WiFiClientSecure client;
+        client.setInsecure();
+        client.setHandshakeTimeout(5);
         HTTPClient http;
-        http.begin(url);
+        http.begin(client, url);
         http.setTimeout(5000);
         if (http.GET() == HTTP_CODE_OK) {
             String payload = http.getString();
@@ -124,9 +132,8 @@ static void fetch_task(void *param) {
                     strlcpy(entry->photo_photographer, photos[0]["photographer"] | "", sizeof(entry->photo_photographer));
                 }
             }
-        } else {
-            http.end();
         }
+        http.end();
         http_mutex_release();
     }
 

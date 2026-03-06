@@ -203,6 +203,7 @@ static int log_page = 0;
 static uint32_t touch_down_time = 0;
 static bool long_press_fired = false;
 static int saved_tx = 0;
+static int saved_ty = 0;
 
 // ---- Settings view ----
 #define NUM_SETTINGS 7
@@ -307,20 +308,29 @@ static void cycle_view() {
         case VIEW_ARRIVALS: current_view = VIEW_STATS;     view_changed = true; break;
         case VIEW_STATS:    current_view = VIEW_LOG;       view_changed = true; break;
         case VIEW_LOG:      current_view = VIEW_SETTINGS;  view_changed = true; break;
-        case VIEW_SETTINGS: current_view = VIEW_DETAIL;    view_changed = true; detail_idx = 0; break;
+        case VIEW_SETTINGS: current_view = VIEW_RADAR;     radar_needs_full_redraw = true; break;
         case VIEW_DETAIL:   current_view = VIEW_RADAR;     radar_needs_full_redraw = true; break;
         default: break;
     }
 }
 
+// Arrivals row → aircraft index mapping (for touch-to-detail)
+static int arrivals_ac_idx[MAX_AIRCRAFT];
+static int arrivals_row_count = 0;
+static int arrivals_list_y = 0;
+
 // ---- Touch handlers per view ----
 
+// Touch zones: 45% left, 10% center, 45% right
+#define TOUCH_LEFT_MAX  (LCD_H_RES * 9 / 20)  // 144
+#define TOUCH_RIGHT_MIN (LCD_H_RES * 11 / 20) // 176
+
 static void handle_touch_radar(int tx) {
-    if (tx < LCD_H_RES / 3) {
+    if (tx < TOUCH_LEFT_MAX) {
         // Left: cycle filter
         filter_cycle();
         radar_needs_full_redraw = true;
-    } else if (tx > LCD_H_RES * 2 / 3) {
+    } else if (tx > TOUCH_RIGHT_MIN) {
         // Right: cycle range
         int old = range_idx;
         range_idx = (range_idx + 1) % NUM_RANGES;
@@ -330,25 +340,33 @@ static void handle_touch_radar(int tx) {
     }
 }
 
-static void handle_touch_arrivals(int tx) {
-    if (tx < LCD_H_RES / 3) {
+static void handle_touch_arrivals(int tx, int ty) {
+    if (tx < TOUCH_LEFT_MAX) {
         // Left: cycle sort
         arr_sort = (ArrSort)((arr_sort + 1) % 3);
         view_changed = true;
-    } else if (tx > LCD_H_RES * 2 / 3) {
+    } else if (tx > TOUCH_RIGHT_MIN) {
         // Right: cycle range
         range_idx = (range_idx + 1) % NUM_RANGES;
         view_changed = true;
     } else {
-        cycle_view();
+        // Center: tap row to open detail, or cycle view if header area
+        int row = (ty - arrivals_list_y) / 16;
+        if (row >= 0 && row < arrivals_row_count) {
+            detail_idx = arrivals_ac_idx[row];
+            current_view = VIEW_DETAIL;
+            view_changed = true;
+        } else {
+            cycle_view();
+        }
     }
 }
 
 static void handle_touch_stats(int tx, bool is_long_press) {
-    if (tx < LCD_H_RES / 3) {
+    if (tx < TOUCH_LEFT_MAX) {
         adjust_brightness(-32);
         view_changed = true;
-    } else if (tx > LCD_H_RES * 2 / 3) {
+    } else if (tx > TOUCH_RIGHT_MIN) {
         adjust_brightness(32);
         view_changed = true;
     } else {
@@ -361,10 +379,10 @@ static void handle_touch_stats(int tx, bool is_long_press) {
 }
 
 static void handle_touch_detail(int tx) {
-    if (tx < LCD_H_RES / 3) {
+    if (tx < TOUCH_LEFT_MAX) {
         detail_idx--;
         view_changed = true;
-    } else if (tx > LCD_H_RES * 2 / 3) {
+    } else if (tx > TOUCH_RIGHT_MIN) {
         detail_idx++;
         view_changed = true;
     } else {
@@ -373,10 +391,10 @@ static void handle_touch_detail(int tx) {
 }
 
 static void handle_touch_log(int tx) {
-    if (tx < LCD_H_RES / 3) {
+    if (tx < TOUCH_LEFT_MAX) {
         if (log_page > 0) log_page--;
         view_changed = true;
-    } else if (tx > LCD_H_RES * 2 / 3) {
+    } else if (tx > TOUCH_RIGHT_MIN) {
         log_page++;
         view_changed = true;
     } else {
@@ -411,10 +429,10 @@ static void settings_adjust_selected() {
 }
 
 static void handle_touch_settings(int tx) {
-    if (tx < LCD_H_RES / 3) {
+    if (tx < TOUCH_LEFT_MAX) {
         settings_sel = (settings_sel - 1 + NUM_SETTINGS) % NUM_SETTINGS;
         view_changed = true;
-    } else if (tx > LCD_H_RES * 2 / 3) {
+    } else if (tx > TOUCH_RIGHT_MIN) {
         settings_sel = (settings_sel + 1) % NUM_SETTINGS;
         view_changed = true;
     } else {
@@ -522,16 +540,29 @@ static void draw_loading() {
     tft.setTextDatum(MC_DATUM);
     uint32_t now = millis();
 
+    if (now - last_dot_time > 500) { last_dot_time = now; load_dots = (load_dots + 1) % 4; }
+    const char *dots = load_dots == 1 ? "." : load_dots == 2 ? ".." : load_dots == 3 ? "..." : "   ";
+
     if (!fetcher_wifi_connected()) {
-        if (now - last_dot_time > 500) { last_dot_time = now; load_dots = (load_dots + 1) % 4; }
         char msg[20];
-        snprintf(msg, sizeof(msg), "WiFi%-3s", load_dots == 1 ? "." : load_dots == 2 ? ".." : load_dots == 3 ? "..." : "");
+        snprintf(msg, sizeof(msg), "WiFi%-3s", dots);
         tft.setTextColor(pal->text, pal->bg);
         tft.drawString(msg, cx, ty, 2);
     } else if (fetcher_last_update() == 0) {
-        if (now - last_dot_time > 500) { last_dot_time = now; load_dots = (load_dots + 1) % 4; }
         char msg[24];
-        snprintf(msg, sizeof(msg), "Scanning%-3s", load_dots == 1 ? "." : load_dots == 2 ? ".." : load_dots == 3 ? "..." : "");
+        snprintf(msg, sizeof(msg), "Scanning%-3s", dots);
+        tft.setTextColor(pal->sweep, pal->bg);
+        tft.drawString(msg, cx, ty, 2);
+        // Show IP once connected
+        const FetcherStats *fs = fetcher_get_stats();
+        if (fs->ip_addr[0]) {
+            tft.setTextColor(pal->fade_med, pal->bg);
+            tft.drawString(fs->ip_addr, cx, ty + 18, 1);
+        }
+    } else {
+        // Brief "found N aircraft" before transitioning
+        char msg[32];
+        snprintf(msg, sizeof(msg), "Found %d aircraft", aircraft_list.count);
         tft.setTextColor(pal->sweep, pal->bg);
         tft.drawString(msg, cx, ty, 2);
     }
@@ -753,6 +784,7 @@ static void draw_arrivals() {
         int16_t dist;
         bool mil;
         bool emg;
+        int ac_idx;  // index into aircraft_list.aircraft[]
     };
     static Entry entries[MAX_AIRCRAFT];
     int n = 0;
@@ -765,6 +797,7 @@ static void draw_arrivals() {
             if (!aircraft_passes_filter(a)) continue;
 
             Entry &e = entries[n];
+            e.ac_idx = i;
             strlcpy(e.call, a.callsign[0] ? a.callsign : a.icao_hex, sizeof(e.call));
             if (a.origin[0] && a.origin[0] != '-' && a.dest[0] && a.dest[0] != '-')
                 snprintf(e.route, sizeof(e.route), "%s>%s", a.origin, a.dest);
@@ -803,6 +836,8 @@ static void draw_arrivals() {
     int max_rows = (RADAR_Y + RADAR_H - y) / 16;
     int drawn = 0;
     char buf[16];
+    arrivals_list_y = y;
+    arrivals_row_count = 0;
 
     for (int i = 0; i < n && drawn < max_rows; i++) {
         Entry &e = entries[i];
@@ -825,9 +860,11 @@ static void draw_arrivals() {
         snprintf(buf, sizeof(buf), "%-3d", e.dist);
         tft.drawString(buf, 278, y, 2);
 
+        arrivals_ac_idx[drawn] = e.ac_idx;
         y += 16;
         drawn++;
     }
+    arrivals_row_count = drawn;
 
     if (y < RADAR_Y + RADAR_H)
         tft.fillRect(0, y, LCD_H_RES, RADAR_Y + RADAR_H - y, pal->bg);
@@ -1418,13 +1455,15 @@ void loop() {
             touch_down_time = now;
             long_press_fired = false;
             saved_tx = tx;
+            saved_ty = ty;
             last_touch_time = now;
             last_cycle_time = now;
         } else {
             saved_tx = tx;  // track latest position
+            saved_ty = ty;
             if (!long_press_fired && (now - touch_down_time) >= LONG_PRESS_MS) {
                 long_press_fired = true;
-                if (saved_tx >= LCD_H_RES / 3 && saved_tx <= LCD_H_RES * 2 / 3) {
+                if (saved_tx >= TOUCH_LEFT_MAX && saved_tx <= TOUCH_RIGHT_MIN) {
                     if (current_view == VIEW_STATS)
                         toggle_night_mode();
                     else if (current_view == VIEW_SETTINGS)
@@ -1436,7 +1475,7 @@ void loop() {
         if (touch_was_down && !long_press_fired) {
             switch (current_view) {
                 case VIEW_RADAR:    handle_touch_radar(saved_tx); break;
-                case VIEW_ARRIVALS: handle_touch_arrivals(saved_tx); break;
+                case VIEW_ARRIVALS: handle_touch_arrivals(saved_tx, saved_ty); break;
                 case VIEW_STATS:    handle_touch_stats(saved_tx, false); break;
                 case VIEW_DETAIL:   handle_touch_detail(saved_tx); break;
                 case VIEW_LOG:      handle_touch_log(saved_tx); break;
@@ -1460,7 +1499,11 @@ void loop() {
 
         if (current_view == VIEW_LOADING) {
             draw_loading();
-            if (fetcher_last_update() > 0) {
+            static uint32_t loading_done_time = 0;
+            if (fetcher_last_update() > 0 && loading_done_time == 0) {
+                loading_done_time = now;  // start brief pause to show count
+            }
+            if (loading_done_time > 0 && now - loading_done_time > 1200) {
                 current_view = VIEW_RADAR;
                 tft.fillScreen(pal->bg);
                 radar_needs_full_redraw = true;

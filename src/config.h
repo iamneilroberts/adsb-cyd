@@ -19,7 +19,7 @@
 #define LCD_V_RES 240
 
 // CYD touch calibration (landscape rotation 1)
-#define TOUCH_X_MIN 3538
-#define TOUCH_X_MAX 620
-#define TOUCH_Y_MIN 3509
-#define TOUCH_Y_MAX 520
+#define TOUCH_X_MIN 2600
+#define TOUCH_X_MAX 1100
+#define TOUCH_Y_MIN 3950
+#define TOUCH_Y_MAX 280

@@ -4,6 +4,7 @@
 #include "../config.h"
 #include "../data/storage.h"
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <esp_heap_caps.h>
@@ -213,10 +214,22 @@ static void update_ip_addr() {
 }
 
 static void fetch_task(void *param) {
+    // Wait for WiFi with retry and radio recycle
     Serial.print("Fetcher: waiting for WiFi");
+    int wait_cycles = 0;
     while (!network_connected()) {
         vTaskDelay(pdMS_TO_TICKS(500));
         Serial.print(".");
+        wait_cycles++;
+        // After 20s (40 cycles), recycle radio and retry
+        if (wait_cycles % 40 == 0) {
+            Serial.printf("\nWiFi retry — recycling radio (attempt %d)\n", wait_cycles / 40 + 1);
+            WiFi.disconnect(false);
+            WiFi.mode(WIFI_OFF);
+            vTaskDelay(pdMS_TO_TICKS(500));
+            WiFi.mode(WIFI_STA);
+            WiFi.begin(g_config.wifi_ssid, g_config.wifi_pass);
+        }
     }
     update_ip_addr();
     Serial.printf("\nWiFi connected, IP: %s\n", _fstats.ip_addr);
@@ -229,18 +242,48 @@ static void fetch_task(void *param) {
     while (true) {
         if (network_connected()) {
             if (http_mutex_acquire(pdMS_TO_TICKS(15000))) {
+                WiFiClientSecure client;
+                client.setInsecure();
+                client.setHandshakeTimeout(10);
+
                 HTTPClient http;
-                http.begin(url);
+                http.begin(client, url);
                 http.setTimeout(10000);
                 uint32_t t0 = millis();
                 int httpCode = http.GET();
+                Serial.printf("Fetch: HTTP %d, %lums, heap=%lu\n",
+                    httpCode, (unsigned long)(millis() - t0),
+                    (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
 
                 if (httpCode == HTTP_CODE_OK) {
                     _fstats.last_fetch_ms = millis() - t0;
 
-                    // Stream-parse with filter — only extract fields we need
-                    WiFiClient *stream = http.getStreamPtr();
+                    // Read full response with deadline loop (fixes truncated JSON)
+                    int content_len = http.getSize();
+                    size_t buf_size = (content_len > 0) ? (size_t)content_len + 1 : 64 * 1024;
+                    char *buf = (char *)malloc(buf_size);
+                    size_t total = 0;
 
+                    if (buf) {
+                        size_t target = (content_len > 0) ? (size_t)content_len : buf_size - 1;
+                        WiFiClient *stream = http.getStreamPtr();
+                        uint32_t deadline = millis() + 15000;
+                        while (total < target && millis() < deadline) {
+                            int avail = stream->available();
+                            if (avail > 0) {
+                                int to_read = min((size_t)avail, target - total);
+                                total += stream->readBytes(buf + total, to_read);
+                            } else if (!stream->connected()) {
+                                break;
+                            } else {
+                                vTaskDelay(1);
+                            }
+                        }
+                        buf[total] = '\0';
+                    }
+                    _fstats.bytes_received += total;
+
+                    // Parse with filter — only extract fields we need
                     JsonDocument filter;
                     JsonObject af = filter["ac"][0].to<JsonObject>();
                     af["hex"] = true;
@@ -265,8 +308,10 @@ static void fetch_task(void *param) {
                     af["nav_qnh"] = true;
 
                     JsonDocument doc;
-                    DeserializationError err = deserializeJson(doc, *stream,
-                        DeserializationOption::Filter(filter));
+                    DeserializationError err = (buf && total > 0)
+                        ? deserializeJson(doc, buf, total, DeserializationOption::Filter(filter))
+                        : DeserializationError::EmptyInput;
+                    if (buf) free(buf);
 
                     if (!err) {
                         _fstats.fetch_ok++;
@@ -332,8 +377,11 @@ static void route_enrich_task(void *param) {
         if (http_mutex_acquire(pdMS_TO_TICKS(12000))) {
             char url[128];
             snprintf(url, sizeof(url), "https://api.adsbdb.com/v0/callsign/%s", callsign);
+            WiFiClientSecure client;
+            client.setInsecure();
+            client.setHandshakeTimeout(8);
             HTTPClient http;
-            http.begin(url);
+            http.begin(client, url);
             http.setTimeout(8000);
             int code = http.GET();
 
@@ -376,10 +424,13 @@ void fetcher_init(AircraftList *list) {
     _aircraft_list = list;
     http_mutex_init();
 
+    WiFi.persistent(false);
+    WiFi.setAutoReconnect(true);
+
+    // Start WiFi non-blocking — fetch_task handles retry/wait
+    Serial.printf("WiFi SSID: [%s]\n", g_config.wifi_ssid);
     WiFi.mode(WIFI_STA);
-    Serial.printf("WiFi SSID: [%s] PASS: [%s]\n", g_config.wifi_ssid, g_config.wifi_pass);
     WiFi.begin(g_config.wifi_ssid, g_config.wifi_pass);
-    Serial.println("WiFi initialization started");
 
     xTaskCreatePinnedToCore(fetch_task, "adsb_fetch", 32768, nullptr, 1, &_fetch_task_handle, 1);
     xTaskCreatePinnedToCore(route_enrich_task, "route_enrich", 8192, nullptr, 0, &_route_task_handle, 1);

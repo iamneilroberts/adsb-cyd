@@ -27,6 +27,16 @@ No PSRAM required. No LVGL. Just direct TFT_eSPI rendering on a $15 board.
 - Available on AliExpress/Amazon for ~$15
 - No additional wiring needed — everything is on-board
 
+### Board layout
+
+![CYD board back](images/ESP32-Cheap-Yellow-Display-CYD-Board-ESP32-2432S028R-back-labeled.jpg)
+
+Key components (viewing the back of the board):
+- **Micro USB** (left side) — for power, programming, and serial monitor
+- **BOOT button** — near the center of the board, next to the speaker
+- **RST button** — top-right corner
+- **ESP-WROOM-32** — the metal-shielded module on the right
+
 ## Setup
 
 ### 1. Install PlatformIO
@@ -37,16 +47,33 @@ Install [VS Code](https://code.visualstudio.com/) and the [PlatformIO extension]
 pip install platformio
 ```
 
-### 2. Clone this repo
+### 2. Install USB drivers
+
+Your CYD has a **CH340** USB-to-serial chip for programming. Some board variants also include a **CP2102** chip, but the CH340 is the one used for flashing.
+
+- **CH340** — [download from manufacturer](http://www.wch-ic.com/downloads/CH341SER_ZIP.html) (Windows/Mac/Linux)
+- **CP2102** (if your board has one) — [download from Silicon Labs](https://www.silabs.com/developers/usb-to-uart-bridge-vcp-drivers)
+
+Most Linux distros include both drivers already. On Windows/Mac, install the driver **before** plugging in the board.
+
+**Linux only:** Add yourself to the `dialout` group so you can access the serial port:
+
+```bash
+sudo usermod -aG dialout $USER
+```
+
+Then **log out and back in** (or reboot) for this to take effect.
+
+### 3. Clone this repo
 
 ```bash
 git clone https://github.com/iamneilroberts/adsb-cyd.git
 cd adsb-cyd
 ```
 
-### 3. Configure your location
+### 4. Configure your location
 
-Edit `src/config.h` and set your home coordinates and WiFi credentials:
+Edit `src/config.h` and set your WiFi credentials and home coordinates:
 
 ```c
 #define WIFI_SSID "YourWiFiName"
@@ -58,59 +85,101 @@ Edit `src/config.h` and set your home coordinates and WiFi credentials:
 
 You can find your coordinates at [latlong.net](https://www.latlong.net/).
 
-### 4. Build
+### 5. Connect the CYD
 
-```bash
-pio run -e cyd
-```
+Plug in the CYD via the **Micro USB** port (left side of the board, when viewing from the back). **Use a data cable, not a charge-only cable** — if the board isn't detected, the cable is the most likely cause.
 
-### 5. Flash
+Verify the board is detected:
 
-Plug in the CYD via USB. It usually shows up as `/dev/ttyUSB0` (Linux) or `COM3` (Windows).
+- **Linux:** `ls /dev/ttyUSB*` — you should see `/dev/ttyUSB0`
+- **Mac:** `ls /dev/cu.usbserial*` or `ls /dev/cu.wchusbserial*`
+- **Windows:** Open Device Manager → Ports — look for "USB-SERIAL CH340" or "CP210x"
+
+### 6. Know your buttons
+
+Refer to the [board layout photo](#board-layout) above. The two buttons on the back are:
+
+- **BOOT** — closer to the center of the board (near the speaker)
+- **RST** (Reset) — in the top-right corner
+
+You may need these during flashing (see step 7).
+
+### 7. Build and flash
 
 ```bash
 pio run -e cyd -t upload
 ```
 
-If you have multiple USB devices, specify the port:
+If the upload fails with a connection error, try holding the **BOOT** button:
+
+1. Hold **BOOT**
+2. While holding BOOT, press and release **RST**
+3. Release **BOOT**
+4. Run the upload command within a few seconds
+
+If the upload fails because it can't find the port, specify it explicitly:
 
 ```bash
+# Linux
 pio run -e cyd -t upload --upload-port /dev/ttyUSB0
+
+# Mac
+pio run -e cyd -t upload --upload-port /dev/cu.usbserial-XYZ
+
+# Windows
+pio run -e cyd -t upload --upload-port COM3
 ```
 
-**Windows:** Replace `/dev/ttyUSB0` with your COM port (e.g., `COM3`). Check Device Manager under "Ports" if unsure.
+### 8. Verify it works
 
-**First time on Linux?** You may need to add yourself to the `dialout` group:
+After flashing, the CYD will reboot and show a startup screen. It will:
+
+1. Connect to your WiFi (the screen shows connection status)
+2. Start fetching aircraft data
+3. Display the radar view with any aircraft in range
+
+If the screen stays white or blank, double-check your WiFi credentials in `src/config.h` and re-flash.
+
+### 9. Monitor serial output (optional)
+
+To see debug output and connection info:
 
 ```bash
-sudo usermod -aG dialout $USER
+pio device monitor
 ```
-Then log out and back in.
 
-### 6. Monitor serial output (optional)
+## Troubleshooting
 
-```bash
-pio device monitor -e cyd
-```
+| Problem | Solution |
+|---------|----------|
+| Board not detected (no `/dev/ttyUSB*` or COM port) | Try a different USB cable — charge-only cables won't work. Install the CH340 or CP2102 driver (see step 2). |
+| "Permission denied" on Linux | Run `sudo usermod -aG dialout $USER`, then log out and back in. |
+| Upload fails with "connection timeout" or "invalid head of packet" | Put the board in download mode: hold **BOOT**, press and release **RST**, release **BOOT**, then upload within a few seconds. |
+| Upload still fails after BOOT/RST | Try a lower baud rate: add `upload_speed = 115200` to `platformio.ini`. Also try a different USB cable. |
+| "Invalid head of packet" every time | Some CYD boards have two serial chips (CH340 + CP2102). The CH340 is the programming port. If you see two `/dev/ttyUSB*` devices, try the other one. On Linux, run `lsusb` to identify which is which. |
+| Screen is white/blank after flash | Check WiFi credentials in `src/config.h`. Open serial monitor (`pio device monitor`) to see error messages. |
+| No aircraft showing | Verify your coordinates are correct. Make sure you're within range of aircraft (75nm default). The free API may have brief outages — wait a minute and check again. |
 
 ## Touch Controls
 
-The screen is divided into three vertical zones: **left third**, **middle third**, **right third**. Tap for a short press, or hold for 1 second for a long press.
+The screen is divided into three vertical zones: **left 45%**, **center 10%**, **right 45%**. The narrow center zone prevents accidental view changes. Tap for a short press, or hold for 1 second for a long press.
 
-| View | Left tap | Middle tap | Middle HOLD (1s) | Right tap |
+| View | Left tap | Center tap | Center HOLD (1s) | Right tap |
 |------|----------|------------|------------------|-----------|
 | **Radar** | Cycle filter (ALL → COM → MIL → EMG → HELI → FAST → SLOW → ODD) | Next view | — | Cycle range (150 → 100 → 50 → 20 → 5nm) |
-| **Arrivals** | Cycle sort (DST → ALT → SPD) | Next view | — | Cycle range |
+| **Arrivals** | Cycle sort (DST → ALT → SPD) | Tap aircraft row → Detail view | — | Cycle range |
 | **Stats** | Brightness down (-12%) | Next view | Toggle night mode (green/amber) | Brightness up (+12%) |
 | **Log** | Previous page | Next view | — | Next page |
 | **Settings** | Previous setting | Next view | Toggle/change selected setting | Next setting |
-| **Detail** | Previous aircraft | Next view | — | Next aircraft |
+| **Detail** | Previous aircraft | Back to Radar | — | Next aircraft |
 
-**View order:** RADAR → ARRIVALS → STATS → LOG → SETTINGS → DETAIL → RADAR
+**View cycle:** Radar → Arrivals → Stats → Log → Settings → Radar
+
+**Detail view** is not part of the normal cycle — tap an aircraft row in the Arrivals list to open it.
 
 ## Settings Screen
 
-Navigate to the settings screen by tapping through views (RADAR → ARRIVALS → STATS → LOG → **SETTINGS**).
+Navigate to the settings screen by tapping through views (Radar → Arrivals → Stats → Log → **Settings**).
 
 - Tap **left/right** to highlight a setting
 - **Long-press middle** (hold for 1 second) to toggle or cycle the value
