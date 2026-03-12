@@ -276,7 +276,11 @@ static bool getTouchPoint(int &tx, int &ty) {
 // ---- Brightness ----
 
 static void apply_brightness() {
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
     ledcWrite(TFT_BL, g_config.brightness);
+#else
+    ledcWrite(0, g_config.brightness);
+#endif
 }
 
 static void adjust_brightness(int delta) {
@@ -1405,7 +1409,12 @@ void setup() {
     Serial.println("ADS-B CYD Radar starting...");
 
     // Backlight via PWM
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
     ledcAttach(TFT_BL, 5000, 8);  // 5kHz, 8-bit resolution
+#else
+    ledcSetup(0, 5000, 8);
+    ledcAttachPin(TFT_BL, 0);
+#endif
 
     // Display
     tft.init();
