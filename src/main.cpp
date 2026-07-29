@@ -266,8 +266,9 @@ static bool getTouchPoint(int &tx, int &ty) {
         sumX += touchRead16(0xD0);
         sumY += touchRead16(0x90);
     }
-    tx = map(sumX / 4, TOUCH_X_MIN, TOUCH_X_MAX, 0, 319);
-    ty = map(sumY / 4, TOUCH_Y_MIN, TOUCH_Y_MAX, 0, 239);
+    // Panel is physically rotated 90° vs display — X/Y channels swapped
+    tx = map(sumY / 4, TOUCH_Y_MAX, TOUCH_Y_MIN, 0, 319);  // was TOUCH_Y_MIN, TOUCH_Y_MAX
+    ty = map(sumX / 4, TOUCH_X_MIN, TOUCH_X_MAX, 0, 239);   // unchanged — this one's fine
     tx = constrain(tx, 0, 319);
     ty = constrain(ty, 0, 239);
     return true;
@@ -1482,6 +1483,7 @@ void loop() {
         }
     } else {
         if (touch_was_down && !long_press_fired) {
+            //Serial.printf("Touch release: tx=%d ty=%d (view=%d)\n", saved_tx, saved_ty, current_view);
             switch (current_view) {
                 case VIEW_RADAR:    handle_touch_radar(saved_tx); break;
                 case VIEW_ARRIVALS: handle_touch_arrivals(saved_tx, saved_ty); break;

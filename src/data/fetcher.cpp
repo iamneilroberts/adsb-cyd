@@ -283,6 +283,9 @@ static void fetch_task(void *param) {
                     }
                     _fstats.bytes_received += total;
 
+                    http.end();          // <-- moved up: free TLS session buffers before we parse
+                    http_mutex_release(); // <-- release the mutex too, since we're done with the network
+
                     // Parse with filter — only extract fields we need
                     JsonDocument filter;
                     JsonObject af = filter["ac"][0].to<JsonObject>();
@@ -331,8 +334,6 @@ static void fetch_task(void *param) {
                     _fstats.fetch_fail++;
                     error_log_add("HTTP %d", httpCode);
                 }
-                http.end();
-                http_mutex_release();
             }
         } else {
             error_log_add("Network down");

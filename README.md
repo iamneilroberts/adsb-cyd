@@ -67,7 +67,7 @@ Then **log out and back in** (or reboot) for this to take effect.
 ### 3. Clone this repo
 
 ```bash
-git clone https://github.com/iamneilroberts/adsb-cyd.git
+git clone https://github.com/PFCPotato/adsb-cyd.git
 cd adsb-cyd
 ```
 
