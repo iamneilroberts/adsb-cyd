@@ -6,6 +6,7 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
+#include "user_agent.h"
 #include <ArduinoJson.h>
 #include <esp_heap_caps.h>
 
@@ -249,6 +250,7 @@ static void fetch_task(void *param) {
                 HTTPClient http;
                 http.begin(client, url);
                 http.setTimeout(10000);
+                http.setUserAgent(user_agent());
                 uint32_t t0 = millis();
                 int httpCode = http.GET();
                 Serial.printf("Fetch: HTTP %d, %lums, heap=%lu\n",
@@ -263,6 +265,9 @@ static void fetch_task(void *param) {
                     size_t buf_size = (content_len > 0) ? (size_t)content_len + 1 : 64 * 1024;
                     char *buf = (char *)malloc(buf_size);
                     size_t total = 0;
+                    Serial.printf("Body: content_len=%d, buf=%s, largest_block=%lu\n",
+                        content_len, buf ? "ok" : "MALLOC FAILED",
+                        (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
 
                     if (buf) {
                         size_t target = (content_len > 0) ? (size_t)content_len : buf_size - 1;
@@ -383,6 +388,7 @@ static void route_enrich_task(void *param) {
             HTTPClient http;
             http.begin(client, url);
             http.setTimeout(8000);
+            http.setUserAgent(user_agent());
             int code = http.GET();
 
             if (code == HTTP_CODE_OK) {

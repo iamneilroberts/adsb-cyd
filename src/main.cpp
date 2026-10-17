@@ -108,9 +108,10 @@ static const ColorPalette *pal = &PALETTE_GREEN;
 #define RADAR_R   (RADAR_H / 2 - 4)
 
 // Range options (nm)
-static const float RANGES[] = {150, 100, 50, 20, 5};
-static const int NUM_RANGES = 5;
-static int range_idx = 1;
+// Data is fetched at ADSB_RADIUS_NM, so ranges beyond that would just show empty space
+static const float RANGES[] = {25, 15, 10, 5};
+static const int NUM_RANGES = 4;
+static int range_idx = 0;
 
 // ---- View state ----
 
@@ -322,12 +323,16 @@ static void cycle_view() {
 static int arrivals_ac_idx[MAX_AIRCRAFT];
 static int arrivals_row_count = 0;
 static int arrivals_list_y = 0;
+#define ARR_BTN_H 24
+#define ARR_BTN_Y (LCD_V_RES - ARR_BTN_H)
 
 // ---- Touch handlers per view ----
 
-// Touch zones: 45% left, 10% center, 45% right
-#define TOUCH_LEFT_MAX  (LCD_H_RES * 9 / 20)  // 144
-#define TOUCH_RIGHT_MIN (LCD_H_RES * 11 / 20) // 176
+// Touch zones (resistive screen, so big targets): thirds of the width below a
+// status-bar strip. Tapping the strip always goes to the next view.
+#define TOUCH_LEFT_MAX   (LCD_H_RES / 3)      // 106
+#define TOUCH_RIGHT_MIN  (LCD_H_RES * 2 / 3)  // 213
+#define TOUCH_STATUS_MAX 28
 
 static void handle_touch_radar(int tx) {
     if (tx < TOUCH_LEFT_MAX) {
@@ -345,23 +350,22 @@ static void handle_touch_radar(int tx) {
 }
 
 static void handle_touch_arrivals(int tx, int ty) {
-    if (tx < TOUCH_LEFT_MAX) {
-        // Left: cycle sort
-        arr_sort = (ArrSort)((arr_sort + 1) % 3);
-        view_changed = true;
-    } else if (tx > TOUCH_RIGHT_MIN) {
-        // Right: cycle range
-        range_idx = (range_idx + 1) % NUM_RANGES;
-        view_changed = true;
-    } else {
-        // Center: tap row to open detail, or cycle view if header area
+    if (ty >= ARR_BTN_Y) {
+        // Button strip along the bottom
+        if (tx < TOUCH_LEFT_MAX) {
+            arr_sort = (ArrSort)((arr_sort + 1) % 3);
+            view_changed = true;
+        } else if (tx > TOUCH_RIGHT_MIN) {
+            range_idx = (range_idx + 1) % NUM_RANGES;
+            view_changed = true;
+        }
+    } else if (ty >= arrivals_list_y) {
+        // Anywhere across a row opens the detail view
         int row = (ty - arrivals_list_y) / 16;
         if (row >= 0 && row < arrivals_row_count) {
             detail_idx = arrivals_ac_idx[row];
             current_view = VIEW_DETAIL;
             view_changed = true;
-        } else {
-            cycle_view();
         }
     }
 }
@@ -483,9 +487,21 @@ static void draw_status_bar(bool force) {
     // Auto-cycle indicator
     if (g_config.cycle_enabled) {
         tft.setTextDatum(TR_DATUM);
-        bool paused = (now - last_touch_time) < ((uint32_t)g_config.cycle_inactivity_s * 1000);
-        tft.setTextColor(paused ? pal->grid : pal->status, pal->status_bg);
-        tft.drawString("AUT", 210, 3, 1);
+        uint32_t pause_ms = (uint32_t)g_config.cycle_inactivity_s * 1000;
+        uint32_t since = now - last_touch_time;
+        char ab[16];
+        uint16_t ac = pal->status;
+        if (current_view == VIEW_DETAIL || current_view == VIEW_SETTINGS) {
+            snprintf(ab, sizeof(ab), "AUTO HOLD");       // these views never auto-cycle
+            ac = TFT_YELLOW;
+        } else if (since < pause_ms) {
+            snprintf(ab, sizeof(ab), "PAUSED %lus", (unsigned long)((pause_ms - since + 999) / 1000));
+            ac = TFT_YELLOW;
+        } else {
+            snprintf(ab, sizeof(ab), "AUTO");
+        }
+        tft.setTextColor(ac, pal->status_bg);
+        tft.drawString(ab, 212, 3, 1);
         tft.setTextColor(pal->status, pal->status_bg);
     }
 
@@ -837,7 +853,7 @@ static void draw_arrivals() {
         entries[j + 1] = tmp;
     }
 
-    int max_rows = (RADAR_Y + RADAR_H - y) / 16;
+    int max_rows = (ARR_BTN_Y - y) / 16;
     int drawn = 0;
     char buf[16];
     arrivals_list_y = y;
@@ -870,8 +886,21 @@ static void draw_arrivals() {
     }
     arrivals_row_count = drawn;
 
-    if (y < RADAR_Y + RADAR_H)
-        tft.fillRect(0, y, LCD_H_RES, RADAR_Y + RADAR_H - y, pal->bg);
+    if (y < ARR_BTN_Y)
+        tft.fillRect(0, y, LCD_H_RES, ARR_BTN_Y - y, pal->bg);
+
+    // Button strip: sort (left) and range (right); the rows above open the detail view
+    tft.fillRect(0, ARR_BTN_Y, LCD_H_RES, ARR_BTN_H, pal->status_bg);
+    tft.drawFastHLine(0, ARR_BTN_Y, LCD_H_RES, pal->hdr);
+    tft.drawFastVLine(TOUCH_LEFT_MAX, ARR_BTN_Y, ARR_BTN_H, pal->hdr);
+    tft.drawFastVLine(TOUCH_RIGHT_MIN, ARR_BTN_Y, ARR_BTN_H, pal->hdr);
+    tft.setTextColor(pal->status, pal->status_bg);
+    tft.setTextDatum(MC_DATUM);
+    snprintf(buf, sizeof(buf), "SORT %s", SORT_LABELS[arr_sort]);
+    tft.drawString(buf, TOUCH_LEFT_MAX / 2, ARR_BTN_Y + ARR_BTN_H / 2, 2);
+    tft.drawString("TAP ROW", LCD_H_RES / 2, ARR_BTN_Y + ARR_BTN_H / 2, 1);
+    snprintf(buf, sizeof(buf), "RNG %d", (int)RANGES[range_idx]);
+    tft.drawString(buf, (TOUCH_RIGHT_MIN + LCD_H_RES) / 2, ARR_BTN_Y + ARR_BTN_H / 2, 2);
 }
 
 // ---- Stats screen ----
@@ -1448,6 +1477,29 @@ void setup() {
         (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
 }
 
+// ---- Touch zone overlay (shown for a few seconds after boot) ----
+
+#define ZONES_SHOW_MS 5000
+static uint32_t zones_overlay_until = 0;
+
+static void draw_touch_zones() {
+    const uint16_t col = TFT_YELLOW;
+    const int top = TOUCH_STATUS_MAX;
+    const int h = LCD_V_RES - top;
+    tft.drawRect(0, 0, LCD_H_RES, top, col);
+    tft.drawRect(0, top, TOUCH_LEFT_MAX, h, col);
+    tft.drawRect(TOUCH_LEFT_MAX, top, TOUCH_RIGHT_MIN - TOUCH_LEFT_MAX, h, col);
+    tft.drawRect(TOUCH_RIGHT_MIN, top, LCD_H_RES - TOUCH_RIGHT_MIN, h, col);
+
+    tft.setTextColor(col, pal->bg);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("NEXT VIEW", LCD_H_RES / 2, top / 2, 2);
+    int cy = top + h / 2;
+    tft.drawString("FILTER", TOUCH_LEFT_MAX / 2, cy, 2);
+    tft.drawString("NEXT VIEW", LCD_H_RES / 2, cy, 2);
+    tft.drawString("RANGE", (TOUCH_RIGHT_MIN + LCD_H_RES) / 2, cy, 2);
+}
+
 // ---- Main loop ----
 
 static uint32_t last_draw = 0;
@@ -1468,8 +1520,13 @@ void loop() {
             last_touch_time = now;
             last_cycle_time = now;
         } else {
-            saved_tx = tx;  // track latest position
-            saved_ty = ty;
+            // Latch position shortly after contact; samples taken as the finger
+            // lifts or rolls are noisy and can land in the wrong touch zone.
+            if (now - touch_down_time < 120) {
+                saved_tx = tx;
+                saved_ty = ty;
+            }
+            last_touch_time = now;
             if (!long_press_fired && (now - touch_down_time) >= LONG_PRESS_MS) {
                 long_press_fired = true;
                 if (saved_tx >= TOUCH_LEFT_MAX && saved_tx <= TOUCH_RIGHT_MIN) {
@@ -1480,8 +1537,14 @@ void loop() {
                 }
             }
         }
+    } else if (touch_was_down && now - last_touch_time < 40) {
+        // Debounce: IRQ can drop out briefly mid-press; wait before calling it a release
     } else {
-        if (touch_was_down && !long_press_fired) {
+        if (touch_was_down && !long_press_fired && current_view != VIEW_LOADING &&
+            saved_ty < TOUCH_STATUS_MAX) {
+            cycle_view();
+            draw_status_bar(true);
+        } else if (touch_was_down && !long_press_fired) {
             switch (current_view) {
                 case VIEW_RADAR:    handle_touch_radar(saved_tx); break;
                 case VIEW_ARRIVALS: handle_touch_arrivals(saved_tx, saved_ty); break;
@@ -1517,6 +1580,7 @@ void loop() {
                 tft.fillScreen(pal->bg);
                 radar_needs_full_redraw = true;
                 draw_status_bar(true);
+                zones_overlay_until = now + ZONES_SHOW_MS;
             }
         } else {
             sweep_angle += SWEEP_SPEED;
@@ -1531,6 +1595,16 @@ void loop() {
                 case VIEW_LOG:      draw_log(); break;
                 case VIEW_SETTINGS: draw_settings(); break;
                 default: break;
+            }
+
+            if (zones_overlay_until) {
+                if (now < zones_overlay_until) {
+                    if (current_view == VIEW_RADAR) draw_touch_zones();
+                } else {
+                    zones_overlay_until = 0;
+                    radar_needs_full_redraw = true;  // wipe the overlay
+                    draw_status_bar(true);
+                }
             }
 
             // Alert overlay on top

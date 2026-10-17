@@ -9,8 +9,8 @@
 #define HOME_LON -88.1632
 
 // ADS-B settings — reduced for CYD (no PSRAM, 320KB DRAM)
-#define ADSB_RADIUS_NM 75
-#define ADSB_POLL_INTERVAL_MS 5000
+#define ADSB_RADIUS_NM 25
+#define ADSB_POLL_INTERVAL_MS 15000
 #define MAX_AIRCRAFT 50
 #define TRAIL_LENGTH 15
 

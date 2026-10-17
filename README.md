@@ -1,6 +1,6 @@
 # ADS-B Radar — CYD Edition
 
-A real-time aircraft radar display for the **ESP32-2432S028** (aka "Cheap Yellow Display" / CYD). Tracks aircraft using the ADS-B Exchange API and displays them on a 320x240 TFT screen with touch interaction.
+A real-time aircraft radar display for the **ESP32-2432S028** (aka "Cheap Yellow Display" / CYD). Tracks aircraft using the free adsb.lol API and displays them on a 320x240 TFT screen with touch interaction.
 
 No PSRAM required. No LVGL. Just direct TFT_eSPI rendering on a $15 board.
 
@@ -14,6 +14,7 @@ No PSRAM required. No LVGL. Just direct TFT_eSPI rendering on a $15 board.
 - **Settings screen** — configure auto-cycle, alerts, trails via touch (persisted to NVS)
 - **Compass rose** — N/S/E/W labels on radar
 - **Auto-cycle** — automatically rotates views, pauses on touch
+- **Large touch hot zones** — status strip plus left/center/right thirds, outlined for 5 seconds at boot
 - **Brightness control** — PWM backlight, adjustable from stats view
 - **Night mode** — amber/red palette, long-press to toggle
 - **Filters** — cycle through ALL/COM/MIL/EMG/HELI/FAST/SLOW/ODD
@@ -26,13 +27,14 @@ No PSRAM required. No LVGL. Just direct TFT_eSPI rendering on a $15 board.
 - **ESP32-2432S028** (ESP32-WROOM-32 with 2.8" ILI9341 320x240 TFT + XPT2046 touch)
 - Available on AliExpress/Amazon for ~$15
 - No additional wiring needed — everything is on-board
+- **USB connector varies by board revision.** The original boards have a Micro USB port; newer revisions have a **USB-C** port instead of, or in addition to, the Micro USB one. Either connector works for power, flashing and the serial monitor. Some revisions also use a different USB-to-serial chip (CH340 or CP2102), so install the matching driver (see Setup step 2).
 
 ### Board layout
 
 ![CYD board back](images/ESP32-Cheap-Yellow-Display-CYD-Board-ESP32-2432S028R-back-labeled.jpg)
 
 Key components (viewing the back of the board):
-- **Micro USB** (left side) — for power, programming, and serial monitor
+- **Micro USB** (left side) — for power, programming, and serial monitor. Newer revisions have a **USB-C** port (and some keep both).
 - **BOOT button** — near the center of the board, next to the speaker
 - **RST button** — top-right corner
 - **ESP-WROOM-32** — the metal-shielded module on the right
@@ -87,7 +89,7 @@ You can find your coordinates at [latlong.net](https://www.latlong.net/).
 
 ### 5. Connect the CYD
 
-Plug in the CYD via the **Micro USB** port (left side of the board, when viewing from the back). **Use a data cable, not a charge-only cable** — if the board isn't detected, the cable is the most likely cause.
+Plug in the CYD via the **Micro USB** port (left side of the board, when viewing from the back), or the **USB-C** port if your board revision has one. **Use a data cable, not a charge-only cable** — if the board isn't detected, the cable is the most likely cause.
 
 Verify the board is detected:
 
@@ -158,20 +160,29 @@ pio device monitor
 | Upload still fails after BOOT/RST | Try a lower baud rate: add `upload_speed = 115200` to `platformio.ini`. Also try a different USB cable. |
 | "Invalid head of packet" every time | Some CYD boards have two serial chips (CH340 + CP2102). The CH340 is the programming port. If you see two `/dev/ttyUSB*` devices, try the other one. On Linux, run `lsusb` to identify which is which. |
 | Screen is white/blank after flash | Check WiFi credentials in `src/config.h`. Open serial monitor (`pio device monitor`) to see error messages. |
-| No aircraft showing | Verify your coordinates are correct. Make sure you're within range of aircraft (75nm default). The free API may have brief outages — wait a minute and check again. |
+| No aircraft showing | Verify your coordinates are correct. Make sure you're within range of aircraft (25nm default, see below). The free API may have brief outages — wait a minute and check again. |
 
 ## Touch Controls
 
-The screen is divided into three vertical zones: **left 45%**, **center 10%**, **right 45%**. The narrow center zone prevents accidental view changes. Tap for a short press, or hold for 1 second for a long press.
+The screen uses large fixed hot zones, sized for a resistive touchscreen: a **status strip** across the top (28 px) and, below it, **left**, **center** and **right** thirds of the screen. Tap for a short press, or hold for 1 second for a long press.
+
+- **Status strip (top)** — always goes to the next view, in every view.
+- **Left / center / right thirds** — the per-view actions in the table below.
+
+For 5 seconds after boot, once the loading screen finishes, the zones are outlined in yellow and labeled on the radar view so you can see where to tap. This also works as a touch-calibration check: if a tap lands in the wrong box, adjust the `TOUCH_*` values in `src/config.h`.
+
+A tap's position is latched just after contact and a release needs 40 ms without touch, which filters out the noisy readings a resistive panel gives as a finger lifts.
 
 | View | Left tap | Center tap | Center HOLD (1s) | Right tap |
 |------|----------|------------|------------------|-----------|
-| **Radar** | Cycle filter (ALL → COM → MIL → EMG → HELI → FAST → SLOW → ODD) | Next view | — | Cycle range (150 → 100 → 50 → 20 → 5nm) |
-| **Arrivals** | Cycle sort (DST → ALT → SPD) | Tap aircraft row → Detail view | — | Cycle range |
+| **Radar** | Cycle filter (ALL → COM → MIL → EMG → HELI → FAST → SLOW → ODD) | Next view | — | Cycle range (25 → 15 → 10 → 5nm) |
+| **Arrivals** | Bottom button strip, left: cycle sort (DST → ALT → SPD) | Tap an aircraft row anywhere across its width → Detail view (use the status strip for next view) | — | Bottom button strip, right: cycle range |
 | **Stats** | Brightness down (-12%) | Next view | Toggle night mode (green/amber) | Brightness up (+12%) |
 | **Log** | Previous page | Next view | — | Next page |
 | **Settings** | Previous setting | Next view | Toggle/change selected setting | Next setting |
 | **Detail** | Previous aircraft | Back to Radar | — | Next aircraft |
+
+**Auto-cycle indicator (status bar):** `AUTO` = running; yellow `PAUSED 42s` = paused after a touch, with the seconds left before it resumes; yellow `AUTO HOLD` = on the Detail or Settings view, which never auto-cycle. Nothing is shown when auto-cycle is off in Settings.
 
 **View cycle:** Radar → Arrivals → Stats → Log → Settings → Radar
 
@@ -199,13 +210,30 @@ Available settings:
 ## Data Sources
 
 - **Aircraft positions:** [api.adsb.lol](https://api.adsb.lol) (free, no API key)
-- **Enrichment data:** [adsbdb.com](https://www.adsbdb.com) (callsign/aircraft lookups)
+- **Enrichment data:** [adsbdb.com](https://www.adsbdb.com) (callsign/aircraft lookups), [planespotters.net](https://www.planespotters.net) (photos)
+
+### Fetch radius and polling
+
+`src/config.h` sets how much data is requested:
+
+```c
+#define ADSB_RADIUS_NM 25            // fetch radius
+#define ADSB_POLL_INTERVAL_MS 15000  // time between fetches
+```
+
+- **Radius is limited by RAM.** The whole response is buffered before parsing, and the CYD has no PSRAM. Around 25nm in busy airspace is ~30 KB; 35nm was already ~56 KB, bigger than the largest free heap block (~43 KB), so the buffer allocation failed and nothing was parsed (`JSON error: EmptyInput`). The radar ranges (25/15/10/5nm) are capped at the fetch radius for this reason. Quiet areas can use a larger radius.
+- **Rate limits.** The free APIs return HTTP 429 if polled too often. Keep the interval at 10s or more.
+- **User-Agent.** Requests identify as `adsb-cyd-radar/1.1 (xxxxxx)`, where `xxxxxx` comes from the chip's MAC address. It is built once and stable per device, which keeps the API operators' view of your traffic clean and helps with bot filters that reject the default ESP32 User-Agent.
+
+## Power
+
+The CYD has no battery charger. If you add a battery, use a charger/boost module with power-path (load-sharing) charging, such as an IP5306-based board or an Adafruit PowerBoost. Simple TP4056 + boost setups can drop the 5V rail when USB is plugged or unplugged and reset the board; a 470–1000 µF capacitor across 5V and GND helps. A `Brownout detector was triggered` message in the serial monitor confirms this.
 
 ## Flash Usage
 
 ```
-RAM:   19.8% (64KB / 320KB)
-Flash: 88.0% (1.15MB / 1.31MB) — ~157KB free
+RAM:   19.9% (64KB / 320KB)
+Flash: 88.7% (1.16MB / 1.31MB) — ~148KB free
 ```
 
 ## License

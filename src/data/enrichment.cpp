@@ -3,6 +3,7 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
+#include "user_agent.h"
 #include <ArduinoJson.h>
 #include <esp_heap_caps.h>
 #include <cstring>
@@ -64,6 +65,7 @@ static void fetch_task(void *param) {
         HTTPClient http;
         http.begin(client, url);
         http.setTimeout(5000);
+        http.setUserAgent(user_agent());
         if (http.GET() == HTTP_CODE_OK) {
             String payload = http.getString();
             JsonDocument doc;
@@ -90,6 +92,7 @@ static void fetch_task(void *param) {
         HTTPClient http;
         http.begin(client, url);
         http.setTimeout(5000);
+        http.setUserAgent(user_agent());
         if (http.GET() == HTTP_CODE_OK) {
             String payload = http.getString();
             JsonDocument doc;
@@ -122,6 +125,7 @@ static void fetch_task(void *param) {
         HTTPClient http;
         http.begin(client, url);
         http.setTimeout(5000);
+        http.setUserAgent(user_agent());
         if (http.GET() == HTTP_CODE_OK) {
             String payload = http.getString();
             JsonDocument doc;
